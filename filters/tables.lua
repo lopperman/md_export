@@ -60,9 +60,56 @@ local function inlines_to_typst(inlines)
       table.insert(result, "_" .. inner .. "_")
 
     elseif inline.t == "Code" then
-      -- Inline code: use #raw() function to avoid backtick escaping issues
-      local code = inline.text:gsub("\"", "\\\"")
-      table.insert(result, "#raw(\"" .. code .. "\")")
+      -- In tables, render code as plain text with break opportunities
+      local text = inline.text
+      local zws = "\226\128\139"  -- UTF-8 encoding of U+200B (zero-width space)
+
+      -- First split at _ and - to get segments
+      local segments = {}
+      local current = ""
+      for i = 1, #text do
+        local char = text:sub(i, i)
+        current = current .. char
+        if char == "_" or char == "-" then
+          table.insert(segments, current)
+          current = ""
+        end
+      end
+      if current ~= "" then
+        table.insert(segments, current)
+      end
+
+      -- For segments > 15 chars, insert break opportunities every 12 chars
+      local final_parts = {}
+      for _, seg in ipairs(segments) do
+        if #seg > 15 then
+          local pos = 1
+          while pos <= #seg do
+            local chunk = seg:sub(pos, pos + 11)
+            table.insert(final_parts, chunk)
+            pos = pos + 12
+          end
+        else
+          table.insert(final_parts, seg)
+        end
+      end
+
+      -- Escape special Typst characters in each part and join with zws
+      local escaped_parts = {}
+      for _, part in ipairs(final_parts) do
+        local escaped = part
+        escaped = escaped:gsub("\\", "\\\\")
+        escaped = escaped:gsub("%[", "\\[")
+        escaped = escaped:gsub("%]", "\\]")
+        escaped = escaped:gsub("#", "\\#")
+        escaped = escaped:gsub("%$", "\\$")
+        escaped = escaped:gsub("\"", "\\\"")
+        escaped = escaped:gsub("`", "\\`")
+        escaped = escaped:gsub("_", "\\_")
+        table.insert(escaped_parts, escaped)
+      end
+
+      table.insert(result, table.concat(escaped_parts, zws))
 
     elseif inline.t == "Link" then
       -- Link: [text](url) -> #link("url")[text] in Typst
@@ -128,6 +175,24 @@ local function cell_to_plain_text(cell)
   return pandoc.utils.stringify(cell.contents)
 end
 
+-- Find the longest inline code element in a cell
+-- Returns the length of the longest code string (0 if no code)
+local function cell_longest_code(cell)
+  local max_code_len = 0
+  for _, block in ipairs(cell.contents) do
+    if block.t == "Plain" or block.t == "Para" then
+      for _, inline in ipairs(block.content) do
+        if inline.t == "Code" then
+          if #inline.text > max_code_len then
+            max_code_len = #inline.text
+          end
+        end
+      end
+    end
+  end
+  return max_code_len
+end
+
 function Table(tbl)
   -- Set all column alignments to left (AlignLeft)
   for i, colspec in ipairs(tbl.colspecs) do
@@ -142,9 +207,12 @@ function Table(tbl)
     local col_max_len = {}
     -- Track longest unbreakable word per column (for minimum width)
     local col_max_word = {}
+    -- Track longest inline code per column (code needs more space - can't wrap easily)
+    local col_max_code = {}
     for i = 1, num_cols do
       col_max_len[i] = 0
       col_max_word[i] = 0
+      col_max_code[i] = 0
     end
 
     -- Collect header cells with formatting
@@ -156,12 +224,16 @@ function Table(tbl)
           local plain_text = cell_to_plain_text(cell)
           local plain_len = #plain_text
           local max_word = longest_word_length(plain_text)
+          local max_code = cell_longest_code(cell)
           table.insert(header_cells, typst_content)
           if plain_len > col_max_len[i] then
             col_max_len[i] = plain_len
           end
           if max_word > col_max_word[i] then
             col_max_word[i] = max_word
+          end
+          if max_code > col_max_code[i] then
+            col_max_code[i] = max_code
           end
         end
       end
@@ -177,6 +249,7 @@ function Table(tbl)
           local plain_text = cell_to_plain_text(cell)
           local plain_len = #plain_text
           local max_word = longest_word_length(plain_text)
+          local max_code = cell_longest_code(cell)
           table.insert(row_cells, typst_content)
           if plain_len > col_max_len[i] then
             col_max_len[i] = plain_len
@@ -184,51 +257,58 @@ function Table(tbl)
           if max_word > col_max_word[i] then
             col_max_word[i] = max_word
           end
+          if max_code > col_max_code[i] then
+            col_max_code[i] = max_code
+          end
         end
         table.insert(body_cells, row_cells)
       end
     end
 
-    -- Determine column widths:
-    -- - Last column always gets 1fr (fills remaining space)
-    -- - Columns with long non-wrappable words get fractional width
-    -- - Other columns: auto if short, or proportional if long
+    -- Determine column widths based on minimum content requirements
+    -- Key insight: width should be proportional to longest non-wrappable segment
     local col_spec = {}
-    local long_col_count = 0
-    local wide_word_col_count = 0
 
-    -- Count how many non-last columns are "long" or have wide non-wrappable words
-    for i = 1, num_cols - 1 do
-      if col_max_len[i] > SHORT_COLUMN_THRESHOLD then
-        long_col_count = long_col_count + 1
-      end
-      if col_max_word[i] > MIN_WORD_WIDTH_THRESHOLD then
-        wide_word_col_count = wide_word_col_count + 1
+    -- Calculate "minimum width need" for each column
+    -- This is the longest segment that absolutely cannot wrap
+    local col_min_need = {}
+    for i = 1, num_cols do
+      if col_max_code[i] > 0 then
+        -- For code columns: find longest segment between _ and -
+        -- (we split code at these chars, so each segment is the min need)
+        -- Approximate: divide code length by number of break points + 1
+        local code_len = col_max_code[i]
+        -- Rough estimate: assume 3-4 segments on average for long code
+        local segments = math.max(1, math.floor(code_len / 15))
+        col_min_need[i] = math.ceil(code_len / segments)
+      else
+        -- For text columns: longest word is the min need
+        col_min_need[i] = col_max_word[i]
       end
     end
 
-    -- Assign widths
+    -- Calculate total "need" to determine proportions
+    local total_need = 0
     for i = 1, num_cols do
-      if i == num_cols then
-        -- Last column always gets 1fr
-        table.insert(col_spec, "1fr")
-      elseif col_max_word[i] > MIN_WORD_WIDTH_THRESHOLD then
-        -- Column has long non-wrappable word: give it fractional width
-        -- to ensure it gets enough space
-        if wide_word_col_count > 2 then
-          table.insert(col_spec, "0.3fr")
-        else
-          table.insert(col_spec, "0.5fr")
-        end
-      elseif col_max_len[i] <= SHORT_COLUMN_THRESHOLD then
-        -- Short columns with short words get auto
+      total_need = total_need + col_min_need[i]
+    end
+
+    -- Assign widths proportionally based on need
+    -- But use some minimums and maximums to keep things reasonable
+    for i = 1, num_cols do
+      local need = col_min_need[i]
+
+      if col_max_len[i] <= SHORT_COLUMN_THRESHOLD and col_max_word[i] <= 10 then
+        -- Truly short columns: use auto
         table.insert(col_spec, "auto")
-      elseif long_col_count > 1 then
-        -- Multiple long columns: give them smaller fixed fractions
-        table.insert(col_spec, "0.5fr")
       else
-        -- Single long column that can wrap: use auto
-        table.insert(col_spec, "auto")
+        -- Calculate proportional fraction based on need
+        local fraction = need / total_need * num_cols
+        -- Clamp to reasonable range: 0.5 to 2.0
+        fraction = math.max(0.5, math.min(2.0, fraction))
+        -- Round to 1 decimal place
+        fraction = math.floor(fraction * 10 + 0.5) / 10
+        table.insert(col_spec, fraction .. "fr")
       end
     end
 

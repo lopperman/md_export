@@ -90,9 +90,9 @@
     #h
   ])
 
-  // Build body cells: 10pt normal
+  // Build body cells: 10pt normal with hyphenation for long words
   let body-cells = body.map(row => row.map(cell => [
-    #set text(size: 10pt)
+    #set text(size: 10pt, hyphenate: true)
     #cell
   ])).flatten()
 

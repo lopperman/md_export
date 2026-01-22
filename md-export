@@ -1,0 +1,252 @@
+#!/bin/bash
+
+# md-export - Convert Markdown files to HTML or PDF
+# Usage: md-export [-t type] [-o output] <input.md>
+
+set -e
+
+# Resolve symlinks to get the actual script directory (works on all macOS versions)
+resolve_symlink() {
+    local file="$1"
+    while [ -L "$file" ]; do
+        local dir="$(cd "$(dirname "$file")" && pwd)"
+        file="$(readlink "$file")"
+        # If relative symlink, resolve it
+        [[ "$file" != /* ]] && file="$dir/$file"
+    done
+    echo "$file"
+}
+
+REAL_SCRIPT="$(resolve_symlink "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)"
+
+VERSION="1.0.0"
+
+# Default values
+OUTPUT_TYPE="pdf"
+OUTPUT_FILE=""
+INPUT_FILE=""
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
+
+usage() {
+    cat << EOF
+Usage: md-export [OPTIONS] <input.md>
+
+Convert Markdown files to HTML or PDF.
+
+Options:
+    -t, --type TYPE     Output type: html, pdf (default: pdf)
+    -o, --output FILE   Output filename (default: input name with new extension)
+    -h, --help          Show this help message
+    -v, --version       Show version
+
+Examples:
+    md-export document.md                    # Creates document.pdf
+    md-export -t html document.md            # Creates document.html
+    md-export -t pdf -o report.pdf README.md # Creates report.pdf
+EOF
+}
+
+error() {
+    echo -e "${RED}Error: $1${NC}" >&2
+    exit 1
+}
+
+success() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+info() {
+    echo -e "${YELLOW}$1${NC}"
+}
+
+# Check dependencies
+check_dependencies() {
+    if ! command -v pandoc &> /dev/null; then
+        error "pandoc is required but not installed. Install with: brew install pandoc"
+    fi
+
+    if [ "$OUTPUT_TYPE" = "pdf" ] && ! command -v typst &> /dev/null; then
+        error "typst is required for PDF output but not installed. Install with: brew install typst"
+    fi
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -t|--type)
+            OUTPUT_TYPE="$2"
+            shift 2
+            ;;
+        -o|--output)
+            OUTPUT_FILE="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -v|--version)
+            echo "md-export version $VERSION"
+            exit 0
+            ;;
+        -*)
+            error "Unknown option: $1"
+            ;;
+        *)
+            INPUT_FILE="$1"
+            shift
+            ;;
+    esac
+done
+
+# Validate input
+if [ -z "$INPUT_FILE" ]; then
+    usage
+    exit 1
+fi
+
+if [ ! -f "$INPUT_FILE" ]; then
+    error "File not found: $INPUT_FILE"
+fi
+
+# Validate output type
+case "$OUTPUT_TYPE" in
+    html|pdf)
+        ;;
+    *)
+        error "Invalid output type: $OUTPUT_TYPE (must be html or pdf)"
+        ;;
+esac
+
+# Check dependencies
+check_dependencies
+
+# Determine output filename
+if [ -z "$OUTPUT_FILE" ]; then
+    BASENAME="${INPUT_FILE%.md}"
+    OUTPUT_FILE="${BASENAME}.${OUTPUT_TYPE}"
+fi
+
+info "Converting $INPUT_FILE to $OUTPUT_TYPE..."
+
+# Convert based on type
+case "$OUTPUT_TYPE" in
+    html)
+        EMOJI_FILTER="$SCRIPT_DIR/filters/emoji.lua"
+
+        pandoc "$INPUT_FILE" \
+            --from markdown \
+            --to html5 \
+            --standalone \
+            --metadata title="$(basename "$INPUT_FILE" .md)" \
+            --lua-filter="$EMOJI_FILTER" \
+            -o "$OUTPUT_FILE" \
+            --include-in-header=<(cat << 'CSSEOF'
+<style>
+@media print {
+    body { margin: 0.5in; }
+    pre { white-space: pre-wrap; }
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 20px;
+    color: #24292e;
+    background-color: #fff;
+}
+h1, h2, h3, h4, h5, h6 {
+    margin-top: 24px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+h1 { font-size: 2em; padding-bottom: 0.3em; border-bottom: 1px solid #eaecef; }
+h2 { font-size: 1.5em; padding-bottom: 0.3em; border-bottom: 1px solid #eaecef; }
+h3 { font-size: 1.25em; }
+code {
+    background-color: rgba(27,31,35,0.05);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 85%;
+}
+pre {
+    background-color: #f6f8fa;
+    padding: 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    line-height: 1.45;
+}
+pre code {
+    padding: 0;
+    background: none;
+    font-size: 100%;
+}
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+}
+th, td {
+    border: 1px solid #dfe2e5;
+    padding: 6px 13px;
+    text-align: left;
+}
+th {
+    background-color: #f6f8fa;
+    font-weight: 600;
+}
+tr:nth-child(even) {
+    background-color: #f6f8fa;
+}
+blockquote {
+    border-left: 4px solid #dfe2e5;
+    margin: 0;
+    padding: 0 16px;
+    color: #6a737d;
+}
+a { color: #0366d6; text-decoration: none; }
+a:hover { text-decoration: underline; }
+img { max-width: 100%; }
+ul, ol { padding-left: 2em; }
+hr { border: none; border-top: 1px solid #eaecef; margin: 24px 0; }
+</style>
+CSSEOF
+)
+        ;;
+    pdf)
+        TEMPLATE="$SCRIPT_DIR/templates/pdf.typ"
+        TABLE_FILTER="$SCRIPT_DIR/filters/tables.lua"
+        TASKS_FILTER="$SCRIPT_DIR/filters/tasks.lua"
+        EMOJI_FILTER="$SCRIPT_DIR/filters/emoji.lua"
+
+        # Get just the filename for the footer
+        SOURCE_FILENAME="$(basename "$INPUT_FILE")"
+
+        # Get current timestamp in format: yyyy-mm-dd hh:mm:ss AM/PM
+        TIMESTAMP="$(date '+%Y-%m-%d %I:%M:%S %p')"
+
+        pandoc "$INPUT_FILE" \
+            --from markdown \
+            --to typst \
+            --pdf-engine=typst \
+            --template="$TEMPLATE" \
+            --lua-filter="$TABLE_FILTER" \
+            --lua-filter="$TASKS_FILTER" \
+            --lua-filter="$EMOJI_FILTER" \
+            -V source-file="$SOURCE_FILENAME" \
+            -V export-timestamp="$TIMESTAMP" \
+            -o "$OUTPUT_FILE"
+        ;;
+esac
+
+success "Created: $OUTPUT_FILE"

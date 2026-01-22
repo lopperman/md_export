@@ -65,6 +65,22 @@ info() {
     echo -e "${YELLOW}$1${NC}"
 }
 
+# Preprocess markdown to add blank lines before tables
+# (Pandoc requires blank lines before tables to recognize them)
+preprocess_markdown() {
+    awk '
+    {
+        # If line starts with | (table row) and previous line was not blank
+        # and previous line was not also a table row, insert a blank line
+        if (/^\|/ && prev !~ /^[[:space:]]*$/ && prev !~ /^\|/) {
+            print ""
+        }
+        print
+        prev = $0
+    }
+    ' "$1"
+}
+
 # Check dependencies
 check_dependencies() {
     if ! command -v pandoc &> /dev/null; then
@@ -140,8 +156,8 @@ case "$OUTPUT_TYPE" in
     html)
         EMOJI_FILTER="$SCRIPT_DIR/filters/emoji.lua"
 
-        pandoc "$INPUT_FILE" \
-            --from markdown \
+        preprocess_markdown "$INPUT_FILE" | pandoc \
+            --from markdown+lists_without_preceding_blankline \
             --to html5 \
             --standalone \
             --metadata title="$(basename "$INPUT_FILE" .md)" \
@@ -235,8 +251,8 @@ CSSEOF
         # Get current timestamp in format: yyyy-mm-dd hh:mm:ss AM/PM
         TIMESTAMP="$(date '+%Y-%m-%d %I:%M:%S %p')"
 
-        pandoc "$INPUT_FILE" \
-            --from markdown \
+        preprocess_markdown "$INPUT_FILE" | pandoc \
+            --from markdown+lists_without_preceding_blankline \
             --to typst \
             --pdf-engine=typst \
             --template="$TEMPLATE" \

@@ -38,6 +38,8 @@ local function inlines_to_typst(inlines)
       text = text:gsub("%$", "\\$")
       text = text:gsub("\"", "\\\"")
       text = text:gsub("`", "\\`")
+      text = text:gsub("<", "\\<")
+      text = text:gsub(">", "\\>")
       table.insert(result, text)
 
     elseif inline.t == "Space" then
@@ -62,54 +64,66 @@ local function inlines_to_typst(inlines)
     elseif inline.t == "Code" then
       -- In tables, render code as plain text with break opportunities
       local text = inline.text
-      local zws = "\226\128\139"  -- UTF-8 encoding of U+200B (zero-width space)
 
-      -- First split at _ and - to get segments
-      local segments = {}
-      local current = ""
-      for i = 1, #text do
-        local char = text:sub(i, i)
-        current = current .. char
-        if char == "_" or char == "-" then
-          table.insert(segments, current)
-          current = ""
-        end
-      end
-      if current ~= "" then
-        table.insert(segments, current)
+      -- Helper function to escape special Typst characters
+      local function escape_typst(s)
+        s = s:gsub("\\", "\\\\")
+        s = s:gsub("%[", "\\[")
+        s = s:gsub("%]", "\\]")
+        s = s:gsub("#", "\\#")
+        s = s:gsub("%$", "\\$")
+        s = s:gsub("\"", "\\\"")
+        s = s:gsub("`", "\\`")
+        s = s:gsub("_", "\\_")
+        s = s:gsub("<", "\\<")
+        s = s:gsub(">", "\\>")
+        return s
       end
 
-      -- For segments > 15 chars, insert break opportunities every 12 chars
-      local final_parts = {}
-      for _, seg in ipairs(segments) do
-        if #seg > 15 then
-          local pos = 1
-          while pos <= #seg do
-            local chunk = seg:sub(pos, pos + 11)
-            table.insert(final_parts, chunk)
-            pos = pos + 12
+      -- Skip ZWS insertion for URLs (causes Typst parsing issues)
+      if text:find("://") then
+        table.insert(result, escape_typst(text))
+      else
+        local zws = "\226\128\139"  -- UTF-8 encoding of U+200B (zero-width space)
+
+        -- First split at _ and - to get segments
+        local segments = {}
+        local current = ""
+        for i = 1, #text do
+          local char = text:sub(i, i)
+          current = current .. char
+          if char == "_" or char == "-" then
+            table.insert(segments, current)
+            current = ""
           end
-        else
-          table.insert(final_parts, seg)
         end
-      end
+        if current ~= "" then
+          table.insert(segments, current)
+        end
 
-      -- Escape special Typst characters in each part and join with zws
-      local escaped_parts = {}
-      for _, part in ipairs(final_parts) do
-        local escaped = part
-        escaped = escaped:gsub("\\", "\\\\")
-        escaped = escaped:gsub("%[", "\\[")
-        escaped = escaped:gsub("%]", "\\]")
-        escaped = escaped:gsub("#", "\\#")
-        escaped = escaped:gsub("%$", "\\$")
-        escaped = escaped:gsub("\"", "\\\"")
-        escaped = escaped:gsub("`", "\\`")
-        escaped = escaped:gsub("_", "\\_")
-        table.insert(escaped_parts, escaped)
-      end
+        -- For segments > 15 chars, insert break opportunities every 12 chars
+        local final_parts = {}
+        for _, seg in ipairs(segments) do
+          if #seg > 15 then
+            local pos = 1
+            while pos <= #seg do
+              local chunk = seg:sub(pos, pos + 11)
+              table.insert(final_parts, chunk)
+              pos = pos + 12
+            end
+          else
+            table.insert(final_parts, seg)
+          end
+        end
 
-      table.insert(result, table.concat(escaped_parts, zws))
+        -- Escape special Typst characters in each part and join with zws
+        local escaped_parts = {}
+        for _, part in ipairs(final_parts) do
+          table.insert(escaped_parts, escape_typst(part))
+        end
+
+        table.insert(result, table.concat(escaped_parts, zws))
+      end
 
     elseif inline.t == "Link" then
       -- Link: [text](url) -> #link("url")[text] in Typst
@@ -148,6 +162,8 @@ local function inlines_to_typst(inlines)
       text = text:gsub("%$", "\\$")
       text = text:gsub("\"", "\\\"")
       text = text:gsub("`", "\\`")
+      text = text:gsub("<", "\\<")
+      text = text:gsub(">", "\\>")
       table.insert(result, text)
     end
   end

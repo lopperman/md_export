@@ -8,6 +8,21 @@
 -- Threshold: columns with max content <= this many chars use 'auto' width
 local SHORT_COLUMN_THRESHOLD = 15
 
+-- Threshold: if longest unbreakable word exceeds this, column needs minimum width
+local MIN_WORD_WIDTH_THRESHOLD = 10
+
+-- Find the longest unbreakable word in a string
+-- Words are split by spaces; this finds the longest token that can't wrap
+local function longest_word_length(text)
+  local max_len = 0
+  for word in text:gmatch("%S+") do
+    if #word > max_len then
+      max_len = #word
+    end
+  end
+  return max_len
+end
+
 -- Convert Pandoc inline elements to Typst markup
 local function inlines_to_typst(inlines)
   local result = {}
@@ -125,8 +140,11 @@ function Table(tbl)
 
     -- Track max plain text length per column (for width calculation)
     local col_max_len = {}
+    -- Track longest unbreakable word per column (for minimum width)
+    local col_max_word = {}
     for i = 1, num_cols do
       col_max_len[i] = 0
+      col_max_word[i] = 0
     end
 
     -- Collect header cells with formatting
@@ -135,10 +153,15 @@ function Table(tbl)
       for _, row in ipairs(tbl.head.rows) do
         for i, cell in ipairs(row.cells) do
           local typst_content = cell_to_typst(cell)
-          local plain_len = #cell_to_plain_text(cell)
+          local plain_text = cell_to_plain_text(cell)
+          local plain_len = #plain_text
+          local max_word = longest_word_length(plain_text)
           table.insert(header_cells, typst_content)
           if plain_len > col_max_len[i] then
             col_max_len[i] = plain_len
+          end
+          if max_word > col_max_word[i] then
+            col_max_word[i] = max_word
           end
         end
       end
@@ -151,10 +174,15 @@ function Table(tbl)
         local row_cells = {}
         for i, cell in ipairs(row.cells) do
           local typst_content = cell_to_typst(cell)
-          local plain_len = #cell_to_plain_text(cell)
+          local plain_text = cell_to_plain_text(cell)
+          local plain_len = #plain_text
+          local max_word = longest_word_length(plain_text)
           table.insert(row_cells, typst_content)
           if plain_len > col_max_len[i] then
             col_max_len[i] = plain_len
+          end
+          if max_word > col_max_word[i] then
+            col_max_word[i] = max_word
           end
         end
         table.insert(body_cells, row_cells)
@@ -163,14 +191,19 @@ function Table(tbl)
 
     -- Determine column widths:
     -- - Last column always gets 1fr (fills remaining space)
+    -- - Columns with long non-wrappable words get fractional width
     -- - Other columns: auto if short, or proportional if long
     local col_spec = {}
     local long_col_count = 0
+    local wide_word_col_count = 0
 
-    -- Count how many non-last columns are "long"
+    -- Count how many non-last columns are "long" or have wide non-wrappable words
     for i = 1, num_cols - 1 do
       if col_max_len[i] > SHORT_COLUMN_THRESHOLD then
         long_col_count = long_col_count + 1
+      end
+      if col_max_word[i] > MIN_WORD_WIDTH_THRESHOLD then
+        wide_word_col_count = wide_word_col_count + 1
       end
     end
 
@@ -179,15 +212,22 @@ function Table(tbl)
       if i == num_cols then
         -- Last column always gets 1fr
         table.insert(col_spec, "1fr")
+      elseif col_max_word[i] > MIN_WORD_WIDTH_THRESHOLD then
+        -- Column has long non-wrappable word: give it fractional width
+        -- to ensure it gets enough space
+        if wide_word_col_count > 2 then
+          table.insert(col_spec, "0.3fr")
+        else
+          table.insert(col_spec, "0.5fr")
+        end
       elseif col_max_len[i] <= SHORT_COLUMN_THRESHOLD then
-        -- Short columns get auto
+        -- Short columns with short words get auto
         table.insert(col_spec, "auto")
       elseif long_col_count > 1 then
         -- Multiple long columns: give them smaller fixed fractions
-        -- so last column still gets most space
         table.insert(col_spec, "0.5fr")
       else
-        -- Single long non-last column: still use auto but it will wrap
+        -- Single long column that can wrap: use auto
         table.insert(col_spec, "auto")
       end
     end

@@ -9,7 +9,7 @@ A command-line tool to convert Markdown files to PDF or HTML with GitHub-style f
 - **Smart Table Formatting**
   - Automatic column width detection
   - Word wrapping enabled
-  - Last column extends to fill available space
+  - Short columns use auto-width, longer columns share space proportionally
   - Header: 11pt bold, Body: 10pt
 - **Preserved Inline Formatting** in tables (bold, italic, code, links)
 - **Task List Checkboxes** render as proper checkboxes (☐ / ✓)

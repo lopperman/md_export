@@ -352,6 +352,8 @@ function Table(tbl)
     typst = typst .. "  ),\n"
 
     -- Body cells as array of arrays
+    -- Note: Always add trailing comma after each row to ensure single-row tables
+    -- are parsed as arrays in Typst (otherwise (item) is interpreted as just item)
     typst = typst .. "  body: (\n"
     for i, row in ipairs(body_cells) do
       typst = typst .. "    ("
@@ -359,8 +361,7 @@ function Table(tbl)
         typst = typst .. "[" .. cell .. "]"
         if j < #row then typst = typst .. ", " end
       end
-      typst = typst .. ")"
-      if i < #body_cells then typst = typst .. "," end
+      typst = typst .. "),"  -- Always add trailing comma
       typst = typst .. "\n"
     end
     typst = typst .. "  ),\n"

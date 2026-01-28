@@ -33,7 +33,7 @@ brew install typst
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/md_export.git
+git clone https://github.com/lopperman/md_export.git
 cd md_export
 
 # Install globally

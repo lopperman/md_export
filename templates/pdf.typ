@@ -84,14 +84,21 @@
 // - Header: 11pt bold, Body: 10pt
 // - Preserves inline formatting (bold, italic, code, links)
 #let smart-table(columns: (), align: (), header: (), body: ()) = {
+  // Normalize header to array (single-column tables pass a single value)
+  let header-arr = if type(header) == array { header } else { (header,) }
+
   // Build header cells: 11pt bold with background
-  let header-cells = header.map(h => table.cell(fill: rgb("#f6f8fa"))[
+  let header-cells = header-arr.map(h => table.cell(fill: rgb("#f6f8fa"))[
     #set text(size: 11pt, weight: "bold")
     #h
   ])
 
+  // Normalize body to array of arrays (single-row/single-column tables may pass single values)
+  let body-arr = if type(body) == array { body } else { (body,) }
+  let body-normalized = body-arr.map(row => if type(row) == array { row } else { (row,) })
+
   // Build body cells: 10pt normal with hyphenation for long words
-  let body-cells = body.map(row => row.map(cell => [
+  let body-cells = body-normalized.map(row => row.map(cell => [
     #set text(size: 10pt, hyphenate: true)
     #cell
   ])).flatten()

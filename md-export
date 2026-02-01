@@ -244,6 +244,7 @@ CSSEOF
         TABLE_FILTER="$SCRIPT_DIR/filters/tables.lua"
         TASKS_FILTER="$SCRIPT_DIR/filters/tasks.lua"
         EMOJI_FILTER="$SCRIPT_DIR/filters/emoji.lua"
+        LINKS_FILTER="$SCRIPT_DIR/filters/links.lua"
 
         # Get just the filename for the footer
         SOURCE_FILENAME="$(basename "$INPUT_FILE")"
@@ -256,6 +257,7 @@ CSSEOF
             --to typst \
             --pdf-engine=typst \
             --template="$TEMPLATE" \
+            --lua-filter="$LINKS_FILTER" \
             --lua-filter="$TABLE_FILTER" \
             --lua-filter="$TASKS_FILTER" \
             --lua-filter="$EMOJI_FILTER" \

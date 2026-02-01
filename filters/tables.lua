@@ -41,6 +41,7 @@ local function inlines_to_typst(inlines)
       text = text:gsub("<", "\\<")
       text = text:gsub(">", "\\>")
       text = text:gsub("@", "\\@")
+      text = text:gsub("%*", "\\*")
       table.insert(result, text)
 
     elseif inline.t == "Space" then
@@ -79,6 +80,7 @@ local function inlines_to_typst(inlines)
         s = s:gsub("<", "\\<")
         s = s:gsub(">", "\\>")
         s = s:gsub("@", "\\@")
+        s = s:gsub("%*", "\\*")
         return s
       end
 
@@ -167,6 +169,7 @@ local function inlines_to_typst(inlines)
       text = text:gsub("<", "\\<")
       text = text:gsub(">", "\\>")
       text = text:gsub("@", "\\@")
+      text = text:gsub("%*", "\\*")
       table.insert(result, text)
     end
   end
